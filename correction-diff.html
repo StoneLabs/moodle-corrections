@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Correction Diff</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231d1b18'/%3E%3Cpath d='M8 12h10' stroke='%23f97066' stroke-width='3' stroke-linecap='round'/%3E%3Cpath d='M8 20h16' stroke='%2347cd89' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-width="2.6">
+        <path d="M4 9h9" stroke="#f97066"/><path d="M4 16h16" stroke="#47cd89"/>
+      </svg>
+    </div>
+    <div>
+      <h1>Correction Diff</h1>
+      <p>Paste the homework, correct it, copy a marked-up version into Moodle.</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <div class="char-bar" id="char-bar" role="toolbar" aria-label="Insert German characters">
+      <button class="tb ch" type="button" data-char="ä" title="Insert ä at the cursor" aria-label="Insert ä">ä</button>
+      <button class="tb ch" type="button" data-char="ö" title="Insert ö at the cursor" aria-label="Insert ö">ö</button>
+      <button class="tb ch" type="button" data-char="ü" title="Insert ü at the cursor" aria-label="Insert ü">ü</button>
+      <button class="tb ch" type="button" data-char="ß" title="Insert ß at the cursor" aria-label="Insert ß">ß</button>
+      <span class="tool-sep" aria-hidden="true"></span>
+      <button class="tb ch" type="button" data-char="Ä" title="Insert Ä at the cursor" aria-label="Insert Ä">Ä</button>
+      <button class="tb ch" type="button" data-char="Ö" title="Insert Ö at the cursor" aria-label="Insert Ö">Ö</button>
+      <button class="tb ch" type="button" data-char="Ü" title="Insert Ü at the cursor" aria-label="Insert Ü">Ü</button>
+      <button class="tb ch" type="button" data-char="ẞ" title="Insert ẞ at the cursor" aria-label="Insert ẞ">ẞ</button>
+    </div>
+    <button class="btn ghost" id="btn-settings" type="button">
+      <svg class="i" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+      Settings &amp; help
+    </button>
+    <button class="btn" id="btn-new" type="button" title="Clear the texts and feedback (your signature stays)">
+      <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+      New student
+    </button>
+  </div>
+</header>
+
+<main class="layout">
+  <section class="card pane-orig" aria-labelledby="h-orig">
+    <div class="card-head">
+      <div class="card-title">
+        <span class="sw sw-del" aria-hidden="true"></span>
+        <h2 id="h-orig">Student's text</h2>
+        <span class="meta" id="count-orig"></span>
+      </div>
+      <div class="card-tools">
+        <div class="fmt-bar" data-for="orig" role="toolbar" aria-label="Formatting of the student's text">
+          <button class="tb" type="button" data-cmd="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
+          <button class="tb" type="button" data-cmd="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
+          <button class="tb" type="button" data-cmd="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button>
+        </div>
+        <span class="tool-sep" aria-hidden="true"></span>
+        <button class="btn ghost sm" id="btn-clear-orig" type="button" title="Clear the student's text">
+          <svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>Clear
+        </button>
+      </div>
+    </div>
+    <div class="editor">
+      <div class="rte" id="orig" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true"
+        aria-labelledby="h-orig" data-placeholder="Paste the student's homework here…"></div>
+    </div>
+  </section>
+
+  <section class="card pane-corr" aria-labelledby="h-corr">
+    <div class="card-head">
+      <div class="card-title">
+        <span class="sw sw-ins" aria-hidden="true"></span>
+        <h2 id="h-corr">Your correction</h2>
+        <span class="meta" id="count-corr"></span>
+      </div>
+      <div class="card-tools">
+        <div class="fmt-bar" data-for="corr" role="toolbar" aria-label="Formatting of your correction">
+          <button class="tb" type="button" data-cmd="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
+          <button class="tb" type="button" data-cmd="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
+          <button class="tb" type="button" data-cmd="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button>
+        </div>
+        <span class="tool-sep" aria-hidden="true"></span>
+        <button class="btn ghost sm" id="btn-note" type="button" title="Insert a note at the cursor (Ctrl+M)">
+          <svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Note
+        </button>
+        <button class="btn ghost sm" id="btn-reset" type="button" title="Replace your correction with the student's text">
+          <svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Reset
+        </button>
+      </div>
+    </div>
+    <div class="editor">
+      <div class="rte" id="corr" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true"
+        aria-labelledby="h-corr" data-placeholder="The student's text appears here — correct it directly.&#10;&#10;Add a gray note anywhere with [[your note]] or Ctrl+M."></div>
+    </div>
+  </section>
+
+  <section class="card pane-fb" aria-labelledby="h-fb">
+    <div class="card-head">
+      <div class="card-title"><h2 id="h-fb">Feedback</h2></div>
+      <div class="fmt-bar" data-for="feedback" role="toolbar" aria-label="Formatting of your feedback">
+        <button class="tb" type="button" data-cmd="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
+        <button class="tb" type="button" data-cmd="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
+        <button class="tb" type="button" data-cmd="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button>
+        <button class="tb" type="button" data-cmd="insertUnorderedList" title="Bulleted list" aria-label="Bulleted list">
+          <svg class="i" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>
+        </button>
+        <button class="tb" type="button" data-cmd="insertOrderedList" title="Numbered list" aria-label="Numbered list">
+          <svg class="i" viewBox="0 0 24 24"><path d="M10 6h10M10 12h10M10 18h10M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="editor">
+      <div class="rte rte-small" id="feedback" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true"
+        aria-labelledby="h-fb" data-placeholder="Your overall feedback for the student…"></div>
+    </div>
+  </section>
+
+  <section class="card pane-sig" aria-labelledby="h-sig">
+    <div class="card-head">
+      <div class="card-title"><h2 id="h-sig">Signature</h2><span class="meta">Kept for every student</span></div>
+      <div class="fmt-bar" data-for="signature" role="toolbar" aria-label="Formatting of your signature">
+        <button class="tb" type="button" data-cmd="bold" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button>
+        <button class="tb" type="button" data-cmd="italic" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button>
+        <button class="tb" type="button" data-cmd="underline" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button>
+      </div>
+    </div>
+    <div class="editor">
+      <div class="rte rte-small rte-sig" id="signature" contenteditable="true" spellcheck="false" role="textbox" aria-multiline="true"
+        aria-labelledby="h-sig" data-placeholder="Best regards,&#10;Your name"></div>
+    </div>
+  </section>
+
+  <section class="card pane-out" aria-labelledby="h-out">
+    <div class="card-head">
+      <div class="card-title">
+        <h2 id="h-out">Output</h2>
+        <div class="stats" id="stats"></div>
+      </div>
+      <div class="out-actions">
+        <button class="btn ghost sm" id="btn-template" type="button" title="Change how the output is assembled">
+          <svg class="i" viewBox="0 0 24 24"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>Template
+        </button>
+        <button class="btn ghost sm" id="btn-copy-text" type="button" title="Copy as plain text: [-removed-] {+added+} [note]">
+          <svg class="i" viewBox="0 0 24 24"><path d="M21 6H3M15 12H3M17 18H3"/></svg>Plain text
+        </button>
+        <button class="btn primary" id="btn-copy" type="button" title="Copy with formatting (Ctrl+Enter)">
+          <svg class="i" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          <span class="lbl">Copy for Moodle</span><span class="kbd-hint">Ctrl ↵</span>
+        </button>
+      </div>
+    </div>
+    <button class="tpl-warning" id="tpl-warning" type="button" hidden>
+      <svg class="i" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      <span>Your template has an error, so the default template is used. Click to fix it.</span>
+    </button>
+    <div class="preview-label"><span>Preview</span><span>as it will look in Moodle</span></div>
+    <div class="paper" id="preview"></div>
+  </section>
+</main>
+
+<dialog id="settings" aria-labelledby="tab-general">
+  <form method="dialog">
+    <div class="dlg-head">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab" id="tab-general" aria-controls="panel-general" aria-selected="true">Settings &amp; help</button>
+        <button type="button" role="tab" class="tab" id="tab-template" aria-controls="panel-template" aria-selected="false">Output template</button>
+      </div>
+      <button class="btn ghost icon" value="close" aria-label="Close">
+        <svg class="i" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div class="dlg-body" id="panel-general" role="tabpanel" aria-labelledby="tab-general">
+      <section>
+        <h3>How it works</h3>
+        <ol class="steps">
+          <li>Paste the student's text on the left. Bold, italic and underline are kept. It is copied to the right automatically until you start editing there.</li>
+          <li>Correct the right side. Removed words light up red, added words green. Changing a word's formatting also counts as a correction.</li>
+          <li>Type <code>[[your note]]</code> anywhere — or press <kbd>Ctrl</kbd> <kbd>M</kbd> — for a gray comment. A note on a line of its own stays on its own line.</li>
+          <li>Format with the toolbars or <kbd>Ctrl</kbd> <kbd>B</kbd> / <kbd>I</kbd> / <kbd>U</kbd>.</li>
+          <li>Press <kbd>Ctrl</kbd> <kbd>Enter</kbd> (or <b>Copy for Moodle</b>) and paste into Moodle's feedback editor with <kbd>Ctrl</kbd> <kbd>V</kbd>.</li>
+        </ol>
+        <p class="fine">What gets copied is assembled by the <b>Output template</b> (see the tab above). Everything stays in this browser: your draft, signature, template and settings are saved locally, and nothing is uploaded.</p>
+      </section>
+      <section>
+        <h3>Diff style</h3>
+        <div class="seg" role="radiogroup" aria-label="Diff style">
+          <label><input type="radio" name="style" value="chars"><span>Characters</span></label>
+          <label><input type="radio" name="style" value="words"><span>Words</span></label>
+          <label><input type="radio" name="style" value="phrases"><span>Phrases</span></label>
+          <label><input type="radio" name="style" value="sentences"><span>Sentences</span></label>
+        </div>
+        <p class="style-desc" id="style-desc"></p>
+        <label class="opt" id="letters-row">
+          <input type="checkbox" id="opt-letters">
+          <span><b>Letter-level fixes inside words</b><small id="letters-desc"></small></span>
+        </label>
+        <div class="style-example" id="style-example" aria-live="polite"></div>
+      </section>
+      <section>
+        <h3>Editing</h3>
+        <label class="opt">
+          <input type="checkbox" id="opt-sync">
+          <span><b>Scroll both texts together</b><small>Keeps the student's text and your correction side by side in long essays.</small></span>
+        </label>
+      </section>
+    </div>
+
+    <div class="dlg-body tpl-panel" id="panel-template" role="tabpanel" aria-labelledby="tab-template" hidden>
+      <div class="tpl-grid">
+        <div class="tpl-main">
+          <div class="tpl-bar">
+            <label for="tpl" class="tpl-label">Template</label>
+            <span class="tpl-status" id="tpl-status"></span>
+            <button type="button" class="btn ghost sm" id="tpl-reset">
+              <svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Reset to default
+            </button>
+          </div>
+          <textarea id="tpl" class="tpl-code" spellcheck="false" autocomplete="off" autocapitalize="off" wrap="off"></textarea>
+          <div class="tpl-error" id="tpl-error" role="alert" hidden></div>
+          <div class="preview-label"><span>Preview</span><span id="tpl-preview-note"></span></div>
+          <div class="paper tpl-preview" id="tpl-preview"></div>
+        </div>
+        <aside class="tpl-ref" aria-label="Template reference">
+          <h3>Variables</h3>
+          <dl>
+            <dt><code>{{ diff }}</code></dt><dd>The corrected text with removals, additions and notes.</dd>
+            <dt><code>{{ original }}</code></dt><dd>The student's text, unmarked.</dd>
+            <dt><code>{{ corrected }}</code></dt><dd>Your correction without markings or notes.</dd>
+            <dt><code>{{ feedback }}</code></dt><dd>Your feedback.</dd>
+            <dt><code>{{ signature }}</code></dt><dd>Your signature.</dd>
+            <dt><code>{{ changes }}</code> <code>{{ notes }}</code></dt><dd>Number of corrections and notes.</dd>
+          </dl>
+          <h3>Helpers</h3>
+          <dl>
+            <dt><code>| collapsible("Title")</code></dt><dd>A section the student opens with a click. Add <code>, true</code> after the title to start it open. Empty values produce nothing.</dd>
+            <dt><code>{{ legend() }}</code></dt><dd>A colour key. Own labels: <code>legend("removed", "added", "note")</code></dd>
+          </dl>
+          <h3>Jinja</h3>
+          <p>Full Jinja syntax (Nunjucks), for example <code>{% if feedback %}…{% endif %}</code>, <code>{% if changes == 0 %}</code> or <code>{# comment #}</code>. Empty fields count as false. Values are already HTML.</p>
+          <p class="fine">Saved in this browser as you type. Moodle up to version 5.2 can't collapse sections and shows them opened.</p>
+        </aside>
+      </div>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span id="toast-msg"></span><button type="button" id="toast-action" hidden>Undo</button>
+</div>
+
+<script src="assets/vendor/nunjucks.min.js"></script>
+<script src="assets/diff-engine.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
