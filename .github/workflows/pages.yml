@@ -1,4 +1,4 @@
-# Publishes the tool to GitHub Pages under /correction-tool/.
+# Publishes the tool to the root of the repo's GitHub Pages site.
 # Run it by hand: Actions → "Publish to GitHub Pages" → Run workflow.
 name: Publish to GitHub Pages
 
@@ -19,24 +19,15 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}correction-tool/
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
 
       - name: Assemble the site
         run: |
-          mkdir -p _site/correction-tool
-          cp correction-diff.html _site/correction-tool/index.html
-          cp -r assets _site/correction-tool/
-          # The site root just forwards to the tool.
-          cat > _site/index.html <<'EOF'
-          <!doctype html>
-          <meta charset="utf-8">
-          <title>Correction Diff</title>
-          <meta http-equiv="refresh" content="0; url=correction-tool/">
-          <link rel="canonical" href="correction-tool/">
-          <a href="correction-tool/">Correction Diff</a>
-          EOF
+          mkdir -p _site
+          cp correction-diff.html _site/index.html
+          cp -r assets _site/
 
       - uses: actions/configure-pages@v6
 
