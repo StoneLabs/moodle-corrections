@@ -215,11 +215,11 @@ function absorb(runs, a, b, keep) {
 const wordCount = t => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
 
 function shapeRuns(runs, a, b, style, fmtA, fmtB, letters) {
-  runs = normaliseRuns(runs, a, b);
+  runs = normaliseRuns(splitLayout(normaliseRuns(runs, a, b), a, b), a, b);
   const refine = rs => normaliseRuns(rs.flatMap(r => (r.eq || r.whole || isLayout(r, a, b) ? [r] : refineRun(r, a, b, fmtA, fmtB, letters))), a, b);
-  if (style === 'words') return refine(runs);
+  if (style === 'words') return joinBreaks(refine(runs), a, b);
   if (style === 'chars') {
-    return absorb(runs, a, b, (t, p, n) => /^\s+$/.test(t) || t.length <= Math.min(runSize(p), runSize(n)));
+    return joinBreaks(absorb(runs, a, b, (t, p, n) => /^\s+$/.test(t) || t.length <= Math.min(runSize(p), runSize(n))), a, b);
   }
   // Phrases: absorb whitespace, and leftover punctuation or one short word
   // (like "a", "we", "das") that is smaller than the changes on both sides and
@@ -232,7 +232,55 @@ function shapeRuns(runs, a, b, style, fmtA, fmtB, letters) {
     runs = normaliseRuns(absorb(runs, a, b, keep), a, b);
   }
   if (style === 'sentences') runs = wholeSentences(runs, a, b, 0.5);
-  return refine(runs);
+  return joinBreaks(refine(runs), a, b);
+}
+
+// Line breaks at the edge of a word change become a layout change of their own,
+// so "Endlich" → "¶ Schlussendlich" reads as a paragraph break followed by
+// "[-Endlich-] {+Schlussendlich+}", not as a break between old and new word.
+function splitLayout(runs, a, b) {
+  const out = [];
+  for (const r of runs) {
+    if (r.eq || isLayout(r, a, b)) { out.push(r); continue; }
+    let { a0, a1, b0, b1 } = r;
+    const lead = (s, e, t) => /^\s*/.exec(t.slice(s, e))[0].length;
+    const trail = (s, e, t) => /\s*$/.exec(t.slice(s, e))[0].length;
+    const la = lead(a0, a1, a), lb = lead(b0, b1, b);
+    if ((a.slice(a0, a0 + la) + b.slice(b0, b0 + lb)).includes('\n')) {
+      out.push({ eq: false, a0, a1: a0 + la, b0, b1: b0 + lb });
+      a0 += la; b0 += lb;
+    }
+    const ta = trail(a0, a1, a), tb = trail(b0, b1, b);
+    let tail = null;
+    if ((a.slice(a1 - ta, a1) + b.slice(b1 - tb, b1)).includes('\n')) {
+      tail = { eq: false, a0: a1 - ta, a1, b0: b1 - tb, b1 };
+      a1 -= ta; b1 -= tb;
+    }
+    out.push({ ...r, a0, a1, b0, b1 });
+    if (tail) out.push(tail);
+  }
+  return out;
+}
+
+// A layout change takes in the unchanged line breaks right next to it, so one
+// added newline next to an existing one renders as "¶" + a real paragraph
+// break instead of two loose line breaks.
+function joinBreaks(runs, a, b) {
+  const out = runs.map(r => ({ ...r }));
+  for (let k = 0; k < out.length; k++) {
+    const r = out[k];
+    if (!isLayout(r, a, b)) continue;
+    const prev = out[k - 1], next = out[k + 1];
+    if (prev && prev.eq) {
+      const ws = /\s*$/.exec(a.slice(prev.a0, prev.a1))[0];
+      if (ws.includes('\n')) { prev.a1 -= ws.length; prev.b1 -= ws.length; r.a0 -= ws.length; r.b0 -= ws.length; }
+    }
+    if (next && next.eq) {
+      const ws = /^\s*/.exec(a.slice(next.a0, next.a1))[0];
+      if (ws.includes('\n')) { next.a0 += ws.length; next.b0 += ws.length; r.a1 += ws.length; r.b1 += ws.length; }
+    }
+  }
+  return normaliseRuns(out, a, b);
 }
 
 // Inside one changed stretch, line the words up again. An identical word longer
