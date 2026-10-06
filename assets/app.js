@@ -14,6 +14,7 @@ const KEYS = {
   signature: 'correction-diff/signature-html',
   oldSignature: 'correction-diff/signature',
   template: 'correction-diff/template',
+  theme: 'correction-diff/theme', // also read by the script in the page's <head>
 };
 const store = {
   get(key, fallback) {
@@ -306,14 +307,16 @@ function rangesFor(model, marks, value) {
 function paintHighlights(om, cm) {
   if (!canHighlight) return;
   if (!om) {
-    for (const name of ['cd-del', 'cd-ins', 'cd-note', 'cd-unclear']) CSS.highlights.delete(name);
+    for (const name of ['cd-del', 'cd-ins', 'cd-note', 'cd-unclear', 'cd-without']) CSS.highlights.delete(name);
     return;
   }
-  const unclearMarks = new Uint8Array(cm.text.length);
-  for (const [s, e] of diff.unclearRaw) unclearMarks.fill(1, s, e);
-  const unclear = new Highlight(...rangesFor(cm, unclearMarks, 1));
-  unclear.priority = -1; // corrections and notes paint on top of the yellow
-  CSS.highlights.set('cd-unclear', unclear);
+  for (const kind of Object.keys(CD.MARKS)) {
+    const marked = new Uint8Array(cm.text.length);
+    for (const [s, e] of diff.markRaw[kind]) marked.fill(1, s, e);
+    const h = new Highlight(...rangesFor(cm, marked, 1));
+    h.priority = -1; // corrections and notes paint on top of the marks
+    CSS.highlights.set(`cd-${kind}`, h);
+  }
   CSS.highlights.set('cd-del', new Highlight(...rangesFor(om, diff.origMarks, MARK_DEL)));
   CSS.highlights.set('cd-ins', new Highlight(...rangesFor(cm, diff.corrMarks, MARK_INS)));
   CSS.highlights.set('cd-note', new Highlight(...rangesFor(cm, diff.corrMarks, MARK_NOTE)));
@@ -369,6 +372,7 @@ function renderStats() {
     : '<span class="chip">No changes yet</span>'];
   if (diff.notes) chips.push(`<span class="chip"><i class="sw sw-note"></i>${plural(diff.notes, 'note', 'notes')}</span>`);
   if (diff.unclear) chips.push(`<span class="chip"><i class="sw sw-unclear"></i>${diff.unclear} unclear</span>`);
+  if (diff.without) chips.push(`<span class="chip"><i class="sw sw-without"></i>${diff.without} better without</span>`);
   stats.innerHTML = chips.join('');
 }
 
@@ -379,8 +383,8 @@ const env = nunjucks ? new nunjucks.Environment([], { autoescape: false, trimBlo
 if (env) {
   env.addFilter('collapsible', (content, title, open) =>
     content ? CD.sectionHTML(title == null ? 'Details' : String(title), String(content), !!open) : '');
-  env.addGlobal('legend', (del = 'removed', ins = 'added', note = 'note', unclear = 'unclear') =>
-    CD.legendHTML(String(del), String(ins), String(note), unclear ? String(unclear) : ''));
+  env.addGlobal('legend', (del = 'removed', ins = 'added', note = 'note', unclear = 'unclear', without = 'better without') =>
+    CD.legendHTML(String(del), String(ins), String(note), unclear ? String(unclear) : '', without ? String(without) : ''));
 }
 
 const cleanError = e => String((e && e.message) || e).replace(/^\(unknown path\)\s*/, '').replace(/\s*\n\s*/g, ' ').trim();
@@ -416,6 +420,7 @@ function outputVars() {
     changes: diff ? diff.changes : 0,
     notes: diff ? diff.notes : 0,
     unclear: diff ? diff.unclear : 0,
+    without: diff ? diff.without : 0,
   };
 }
 
@@ -476,6 +481,7 @@ function htmlToText(html) {
       case 'SUMMARY': block(); inner(); out += ':\n'; return;
       case 'SPAN':
         if (node.getAttribute('style') === STYLE.unclear) { out += '['; inner(); out += ']'; return; }
+        if (node.getAttribute('style') === STYLE.without) { out += '[~'; inner(); out += '~]'; return; }
         break;
       case 'EM':
         if (node.getAttribute('style') === STYLE.note) { out += '['; inner(); out += ']'; return; }
@@ -593,7 +599,7 @@ for (const ed of EDITORS) {
     }
     if (ed === corr && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === '?' || (e.shiftKey && e.code === 'Slash'))) {
       e.preventDefault();
-      toggleUnclear();
+      toggleMark('unclear');
       return;
     }
     if (e.isComposing || e.altKey || e.shiftKey || !(e.ctrlKey || e.metaKey)) return;
@@ -693,7 +699,7 @@ function insertNote() {
 }
 $('btn-note').addEventListener('click', insertNote);
 
-/* ---------- Unclear passages ---------- */
+/* ---------- Marked passages: unclear, better without ---------- */
 
 // Model index of a DOM position: the first character at or after it.
 function modelOffset(model, node, offset) {
@@ -755,9 +761,24 @@ function sentenceAround(t, c) {
   return [s, e];
 }
 
-// Wrap the selection, or the sentence at the cursor, in "[? … ?]"; inside an
-// existing mark, remove it instead. Uses editing commands, so Ctrl+Z works.
-function toggleUnclear() {
+// The word at index c (letters, digits, apostrophes and inner hyphens).
+function wordAround(t, c) {
+  const w = /[\p{L}\p{N}\p{M}'’-]/u;
+  let s = c, e = c;
+  if (!(e < t.length && w.test(t[e])) && s > 0 && w.test(t[s - 1])) { s--; e = s + 1; }
+  while (s > 0 && w.test(t[s - 1])) s--;
+  while (e < t.length && w.test(t[e])) e++;
+  while (s < e && /['’-]/.test(t[s])) s++;
+  while (e > s && /['’-]/.test(t[e - 1])) e--;
+  return [s, e];
+}
+
+// Wrap the selection — or, with nothing selected, the sentence (unclear) or
+// word (better without) at the cursor — in the mark's brackets; inside an
+// existing mark of that kind, remove it instead. Uses editing commands, so
+// Ctrl+Z works.
+function toggleMark(kind) {
+  const { open, close } = CD.MARKS[kind];
   const sel = getSelection();
   if (document.activeElement !== corr) {
     corr.focus();
@@ -778,7 +799,7 @@ function toggleUnclear() {
     sel.addRange(r);
   };
 
-  const hit = CD.findUnclear(model.text).find(u => (from >= u.s && from <= u.e) || (to > u.s && to <= u.e));
+  const hit = CD.findMarks(model.text, kind).find(u => (from >= u.s && from <= u.e) || (to > u.s && to <= u.e));
   if (hit) {
     selectSpan(hit.e - hit.close, hit.e);
     run('delete');
@@ -788,23 +809,23 @@ function toggleUnclear() {
     return;
   }
 
-  if (from === to) [from, to] = sentenceAround(model.text, from);
+  if (from === to) [from, to] = (kind === 'unclear' ? sentenceAround : wordAround)(model.text, from);
   while (from < to && /\s/.test(model.text[from])) from++;
   while (to > from && /\s/.test(model.text[to - 1])) to--;
   if (from === to) return;
   // Closing marker first: the text before it keeps its positions.
   placeCaret(pointAfter(model, to));
-  run('insertText', '?]');
+  run('insertText', close);
   model = readModel(corr, { positions: true });
   placeCaret(pointBefore(model, from));
-  run('insertText', '[?');
+  run('insertText', open);
   model = readModel(corr, { positions: true });
-  placeCaret(pointAfter(model, to + 4));
+  placeCaret(pointAfter(model, to + open.length + close.length));
 }
 
-const unclearBtn = $('btn-unclear');
-for (const btn of [$('btn-note'), unclearBtn]) btn.addEventListener('mousedown', e => e.preventDefault());
-unclearBtn.addEventListener('click', toggleUnclear);
+for (const btn of [$('btn-note'), $('btn-unclear'), $('btn-without')]) btn.addEventListener('mousedown', e => e.preventDefault());
+$('btn-unclear').addEventListener('click', () => toggleMark('unclear'));
+$('btn-without').addEventListener('click', () => toggleMark('without'));
 
 /* ---------- Undoable bulk actions ---------- */
 
@@ -1058,6 +1079,7 @@ function sampleVars() {
     changes: d.changes,
     notes: d.notes,
     unclear: d.unclear,
+    without: d.without,
   };
 }
 
@@ -1094,6 +1116,44 @@ $('tpl-reset').addEventListener('click', () => {
   setTemplate(DEFAULT_TEMPLATE);
   toast('Template reset to the default', () => setTemplate(before));
 });
+
+/* ---------- Theme ---------- */
+
+const THEMES = {
+  auto: { label: 'Auto', icon: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>' },
+  light: { label: 'Light', icon: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>' },
+  dark: { label: 'Dark', icon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>' },
+};
+const THEME_ORDER = Object.keys(THEMES);
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+let themePref = store.get(KEYS.theme, 'auto');
+if (!THEMES[themePref]) themePref = 'auto';
+
+function applyTheme() {
+  const dark = themePref === 'dark' || (themePref === 'auto' && systemDark.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(themePref) + 1) % THEME_ORDER.length];
+  const btn = $('btn-theme');
+  btn.innerHTML = `<svg class="i" viewBox="0 0 24 24">${THEMES[themePref].icon}</svg>`;
+  btn.title = `Theme: ${THEMES[themePref].label}${themePref === 'auto' ? ' (follows your system)' : ''} — click for ${THEMES[next].label}`;
+  btn.setAttribute('aria-label', btn.title);
+  for (const r of document.querySelectorAll('input[name="theme"]')) r.checked = r.value === themePref;
+}
+function setTheme(pref) {
+  themePref = pref;
+  store.set(KEYS.theme, pref);
+  applyTheme();
+}
+systemDark.addEventListener('change', () => { if (themePref === 'auto') applyTheme(); });
+$('btn-theme').addEventListener('click', () => {
+  setTheme(THEME_ORDER[(THEME_ORDER.indexOf(themePref) + 1) % THEME_ORDER.length]);
+  toast(`Theme: ${THEMES[themePref].label}${themePref === 'auto' ? ' — follows your system' : ''}`);
+});
+for (const r of document.querySelectorAll('input[name="theme"]')) {
+  r.addEventListener('change', () => { if (r.checked) setTheme(r.value); });
+  r.nextElementSibling.insertAdjacentHTML('afterbegin', `<svg class="i" viewBox="0 0 24 24">${THEMES[r.value].icon}</svg>`);
+}
+applyTheme();
 
 /* ---------- Start ---------- */
 

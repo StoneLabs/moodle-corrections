@@ -20,6 +20,7 @@ const STYLE = {
   sectionBody: 'margin:0.5em 0 0.9em 0.3em;padding:0.1em 0 0.1em 0.9em;border-left:3px solid #e4e7ec;color:#344054',
   unclear: 'background-color:#fef08a;border-radius:3px',
   unclearMark: 'color:#a16207;font-weight:700',
+  without: 'text-decoration:underline;text-decoration-color:#d92d20;text-decoration-thickness:2px',
 };
 
 // Inline formatting is carried per character, next to the text, as a bit set.
@@ -532,30 +533,41 @@ function extractNotes(raw) {
   return { text: out, map, notes };
 }
 
-// "[? … ?]" marks a passage the teacher can't follow. The markers (and the
-// spaces just inside them) are removed before diffing, like notes; the
-// passage itself is diffed normally and later shown in yellow.
-const UNCLEAR_RE = /\[\?[^\S\n]*([\s\S]*?)[^\S\n]*\?\]/g;
-function findUnclear(text) {
+// Marks the teacher puts around a passage of the correction. The markers (and
+// the spaces just inside them) are removed before diffing, like notes; the
+// passage itself is diffed normally and later shown highlighted.
+//   [? … ?]  unclear: "what are you trying to say?" — yellow, with ? … ?
+//   [~ … ~]  better without: not wrong, but could go — red underline
+const MARKS = {
+  unclear: { open: '[?', close: '?]', re: /\[\?[^\S\n]*([\s\S]*?)[^\S\n]*\?\]/g },
+  without: { open: '[~', close: '~]', re: /\[~[^\S\n]*([\s\S]*?)[^\S\n]*~\]/g },
+};
+const MARK_KINDS = Object.keys(MARKS);
+
+function findMarks(text, kind) {
+  const { re } = MARKS[kind];
   const found = [];
-  UNCLEAR_RE.lastIndex = 0;
+  re.lastIndex = 0;
   let m;
-  while ((m = UNCLEAR_RE.exec(text))) {
-    const open = /^\[\?[^\S\n]*/.exec(m[0])[0].length;
-    const close = m[1] ? /[^\S\n]*\?\]$/.exec(m[0])[0].length : m[0].length - open;
+  while ((m = re.exec(text))) {
+    const open = /^\[.[^\S\n]*/.exec(m[0])[0].length;
+    const close = m[1] ? /[^\S\n]*.\]$/.exec(m[0])[0].length : m[0].length - open;
     found.push({ s: m.index, e: m.index + m[0].length, open, close });
   }
   return found;
 }
 
 // Remove the markers from the note-free text. Returns the new text, its map back
-// to the raw correction, notes moved to the new positions, the marked ranges in
-// the new text, and the raw ranges (markers included) for the editor highlight.
-function extractUnclear(text, map, notes) {
-  const found = findUnclear(text);
-  if (!found.length) return { text, map, notes, ranges: [], raw: [] };
+// to the raw correction, notes moved to the new positions, and per kind the
+// marked ranges in the new text and the raw ranges (markers included) for the
+// editor highlight.
+function extractMarks(text, map, notes) {
+  const found = Object.fromEntries(MARK_KINDS.map(k => [k, findMarks(text, k)]));
+  const all = MARK_KINDS.flatMap(k => found[k]);
+  const empty = Object.fromEntries(MARK_KINDS.map(k => [k, []]));
+  if (!all.length) return { text, map, notes, ranges: empty, raw: { ...empty } };
   const keep = new Uint8Array(text.length).fill(1);
-  for (const f of found) {
+  for (const f of all) {
     keep.fill(0, f.s, f.s + f.open);
     keep.fill(0, f.e - f.close, f.e);
   }
@@ -569,13 +581,12 @@ function extractUnclear(text, map, notes) {
   index[text.length] = newMap.length;
   const raw = i => (map ? map[i] : i);
   for (const n of notes) n.pos = index[Math.min(n.pos, text.length)];
-  return {
-    text: out,
-    map: newMap,
-    notes,
-    ranges: found.map(f => ({ start: index[f.s + f.open], end: index[f.e - f.close] })).filter(r => r.end > r.start),
-    raw: found.map(f => [raw(f.s), raw(f.e - 1) + 1]),
-  };
+  const ranges = {}, rawRanges = {};
+  for (const k of MARK_KINDS) {
+    ranges[k] = found[k].map(f => ({ start: index[f.s + f.open], end: index[f.e - f.close] })).filter(r => r.end > r.start);
+    rawRanges[k] = found[k].map(f => [raw(f.s), raw(f.e - 1) + 1]);
+  }
+  return { text: out, map: newMap, notes, ranges, raw: rawRanges };
 }
 
 // Interleave notes with the diff runs at their anchor positions.
@@ -632,19 +643,22 @@ function computeDiff(orig, corr, opts) {
   const style = STYLES.includes(opts.style) ? opts.style : 'phrases';
   const mode = style === 'chars' ? 'char' : 'word';
   const notesOnly = extractNotes(corr.text);
-  const ex = extractUnclear(notesOnly.text, notesOnly.map, notesOnly.notes);
+  const ex = extractMarks(notesOnly.text, notesOnly.map, notesOnly.notes);
   const fmtA = orig.fmt || null;
   const fmtB = corr.fmt ? (ex.map ? ex.map.map(i => corr.fmt[i]) : corr.fmt) : null;
   const a = orig.text.replace(/\s+$/, '');
   const b = ex.text.replace(/\s+$/, '');
   for (const n of ex.notes) if (n.pos > b.length) n.pos = b.length;
-  const unclear = ex.ranges.map(r => ({ start: Math.min(r.start, b.length), end: Math.min(r.end, b.length) })).filter(r => r.end > r.start);
+  const marks = {};
+  for (const k of MARK_KINDS) {
+    marks[k] = ex.ranges[k].map(r => ({ start: Math.min(r.start, b.length), end: Math.min(r.end, b.length) })).filter(r => r.end > r.start);
+  }
 
   const A = tokenize(a, mode), B = tokenize(b, mode);
   const [ia, ib] = intern(tokenKeys(A, fmtA), tokenKeys(B, fmtB));
   let runs = toRuns(diffTokens(ia, ib), A, B);
   runs = shapeRuns(runs, a, b, style, fmtA, fmtB, style !== 'chars' && opts.letters !== false);
-  const segs = buildSegments(runs, a, b, ex.notes, unclear);
+  const segs = buildSegments(runs, a, b, ex.notes, MARK_KINDS.flatMap(k => marks[k]));
 
   // Per-character marks for highlighting inside the two editors.
   const origMarks = new Uint8Array(orig.text.length);
@@ -660,9 +674,10 @@ function computeDiff(orig, corr, opts) {
     mode,
     changes: runs.filter(r => !r.eq && !r.fine).length + new Set(runs.filter(r => r.fine).map(r => r.fine)).size,
     notes: ex.notes.filter(n => n.text).length,
-    unclear: unclear.length,
-    unclearRanges: unclear,
-    unclearRaw: ex.raw,
+    unclear: marks.unclear.length,
+    without: marks.without.length,
+    marks,
+    markRaw: ex.raw,
     empty: !a && !b && !ex.notes.some(n => n.text),
     original: a,
     corrected: b,
@@ -694,28 +709,34 @@ function fmtHTML(text, fmt, offset) {
 
 function renderDiffHTML(diff) {
   const { segs, mode, fmtA, fmtB } = diff;
-  const ranges = diff.unclearRanges || [];
+  const marks = diff.marks || {};
   const wordPad = mode === 'word' ? ';padding:1px 2px' : '';
   const pad = wordPad;
   const paras = [[]];
   let cur = paras[0];
 
-  // Unclear passages: a yellow span with "? … ?" inside it. A span can't cross
-  // paragraphs, so it is closed and reopened at paragraph breaks.
-  const U_OPEN = `<span style='${STYLE.unclear}'>`, U_CLOSE = '</span>';
+  // Marked passages become spans, unclear outside, better-without inside. An
+  // unclear passage gets "? … ?" inside its yellow. Spans can't cross
+  // paragraphs, so they are closed and reopened (without the ?) at a break.
   const Q = `<strong style='${STYLE.unclearMark}'>?</strong>`;
-  let unclear = false;
-  const setUnclear = on => {
-    if (on === unclear) return;
-    cur.push(on ? `${U_OPEN}${Q} ` : ` ${Q}${U_CLOSE}`);
-    unclear = on;
+  const OPEN = { unclear: `<span style='${STYLE.unclear}'>`, without: `<span style='${STYLE.without}'>` };
+  const CLOSE = '</span>';
+  const inside = (kind, p) => (marks[kind] || []).some(r => r.start <= p && p < r.end);
+  let open = [];
+  const setMarks = p => {
+    const want = MARK_KINDS.filter(k => inside(k, p));
+    let i = 0;
+    while (i < open.length && i < want.length && open[i] === want[i]) i++;
+    for (let k = open.length - 1; k >= i; k--) cur.push(open[k] === 'unclear' ? ` ${Q}${CLOSE}` : CLOSE);
+    for (let k = i; k < want.length; k++) cur.push(want[k] === 'unclear' ? `${OPEN.unclear}${Q} ` : OPEN[want[k]]);
+    open = want;
   };
-  const inside = p => ranges.some(r => r.start <= p && p < r.end);
   const newPara = () => {
-    if (unclear) cur.push(U_CLOSE);
+    for (let k = open.length - 1; k >= 0; k--) cur.push(CLOSE);
     if (cur.length) { cur = []; paras.push(cur); }
-    if (unclear) cur.push(U_OPEN);
+    for (const k of open) cur.push(OPEN[k]);
   };
+  const isTag = x => x === CLOSE || Object.values(OPEN).includes(x);
 
   const pushText = (text, fmt, offset) => {
     const re = /\n(?:[^\S\n]*\n)+|\n/g;
@@ -777,7 +798,7 @@ function renderDiffHTML(diff) {
 
   for (let k = 0; k < segs.length; k++) {
     const s = segs[k];
-    setUnclear(inside(s.t === 'del' ? s.at : s.t === 'note' ? s.note.pos : s.b0));
+    setMarks(s.t === 'del' ? s.at : s.t === 'note' ? s.note.pos : s.b0);
     if (s.t === 'eq') {
       pushText(s.text, fmtB, s.b0);
     } else if (s.t === 'del' || s.t === 'ins') {
@@ -805,8 +826,8 @@ function renderDiffHTML(diff) {
       else cur.push(esc(n.pre) + noteHTML(n) + esc(n.post));
     }
   }
-  setUnclear(false);
-  return paras.filter(p => p.some(x => x !== U_OPEN && x !== U_CLOSE)).map(p => `<p>${p.join('')}</p>`).join('\n');
+  setMarks(Infinity);
+  return paras.filter(p => p.some(x => !isTag(x))).map(p => `<p>${p.join('')}</p>`).join('\n');
 }
 
 // Formatted text as HTML: blank lines start a paragraph, single newlines become
@@ -845,18 +866,19 @@ function sectionHTML(title, html, open) {
     `</details>`;
 }
 
-function legendHTML(del, ins, note, unclear) {
+function legendHTML(del, ins, note, unclear, without) {
   const q = `<strong style='${STYLE.unclearMark}'>?</strong>`;
   return `<p style='${STYLE.legend}'>` +
     `<del style='${STYLE.del};padding:1px 2px'>${esc(del)}</del>&nbsp; ` +
     `<ins style='${STYLE.ins};padding:1px 2px'>${esc(ins)}</ins>&nbsp; ` +
     `<em style='${STYLE.note}'>${esc(note)}</em>` +
-    (unclear ? `&nbsp; <span style='${STYLE.unclear}'>${q} ${esc(unclear)} ${q}</span>` : '') + '</p>';
+    (unclear ? `&nbsp; <span style='${STYLE.unclear}'>${q} ${esc(unclear)} ${q}</span>` : '') +
+    (without ? `&nbsp; <span style='${STYLE.without}'>${esc(without)}</span>` : '') + '</p>';
 }
 
 const api = {
   esc, STYLE, STYLES, BOLD, ITALIC, UNDERLINE,
-  extractNotes, findUnclear, computeDiff, renderDiffHTML, modelToHTML, sectionHTML, legendHTML,
+  MARKS, extractNotes, findMarks, computeDiff, renderDiffHTML, modelToHTML, sectionHTML, legendHTML,
 };
 root.CorrectionDiff = api;
 if (typeof module === 'object' && module.exports) module.exports = api;
