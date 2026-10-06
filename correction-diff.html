@@ -88,6 +88,9 @@
         <button class="btn ghost sm" id="btn-note" type="button" title="Insert a note at the cursor (Ctrl+M)">
           <svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Note
         </button>
+        <button class="btn ghost sm" id="btn-unclear" type="button" title="Mark the sentence at the cursor (or the selected text) as unclear — Ctrl+?. Click again inside it to remove the mark.">
+          <span class="q-badge" aria-hidden="true">?</span>Unclear
+        </button>
         <button class="btn ghost sm" id="btn-reset" type="button" title="Replace your correction with the student's text">
           <svg class="i" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>Reset
         </button>
@@ -182,6 +185,7 @@
           <li>Paste the student's text on the left. Bold, italic and underline are kept. It is copied to the right automatically until you start editing there.</li>
           <li>Correct the right side. Removed words light up red, added words green. Changing a word's formatting also counts as a correction.</li>
           <li>Type <code>[[your note]]</code> anywhere — or press <kbd>Ctrl</kbd> <kbd>M</kbd> — for a gray comment. A note on a line of its own stays on its own line.</li>
+          <li>Can't tell what a sentence means? Put the cursor in it and click <b>? Unclear</b> (<kbd>Ctrl</kbd> <kbd>?</kbd>), or type <code>[? … ?]</code> around it. It turns yellow with <b>?</b> … <b>?</b> around it. Click again inside it to remove the mark.</li>
           <li>Format with the toolbars or <kbd>Ctrl</kbd> <kbd>B</kbd> / <kbd>I</kbd> / <kbd>U</kbd>.</li>
           <li>Press <kbd>Ctrl</kbd> <kbd>Enter</kbd> (or <b>Copy for Moodle</b>) and paste into Moodle's feedback editor with <kbd>Ctrl</kbd> <kbd>V</kbd>.</li>
         </ol>
@@ -234,12 +238,12 @@
             <dt><code>{{ corrected }}</code></dt><dd>Your correction without markings or notes.</dd>
             <dt><code>{{ feedback }}</code></dt><dd>Your feedback.</dd>
             <dt><code>{{ signature }}</code></dt><dd>Your signature.</dd>
-            <dt><code>{{ changes }}</code> <code>{{ notes }}</code></dt><dd>Number of corrections and notes.</dd>
+            <dt><code>{{ changes }}</code> <code>{{ notes }}</code> <code>{{ unclear }}</code></dt><dd>Number of corrections, notes and unclear passages.</dd>
           </dl>
           <h3>Helpers</h3>
           <dl>
             <dt><code>| collapsible("Title")</code></dt><dd>A section the student opens with a click. Add <code>, true</code> after the title to start it open. Empty values produce nothing.</dd>
-            <dt><code>{{ legend() }}</code></dt><dd>A colour key. Own labels: <code>legend("removed", "added", "note")</code></dd>
+            <dt><code>{{ legend() }}</code></dt><dd>A colour key. Own labels: <code>legend("removed", "added", "note", "unclear")</code></dd>
           </dl>
           <h3>Jinja</h3>
           <p>Full Jinja syntax (Nunjucks), for example <code>{% if feedback %}…{% endif %}</code>, <code>{% if changes == 0 %}</code> or <code>{# comment #}</code>. Empty fields count as false. Values are already HTML.</p>

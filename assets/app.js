@@ -306,9 +306,14 @@ function rangesFor(model, marks, value) {
 function paintHighlights(om, cm) {
   if (!canHighlight) return;
   if (!om) {
-    for (const name of ['cd-del', 'cd-ins', 'cd-note']) CSS.highlights.delete(name);
+    for (const name of ['cd-del', 'cd-ins', 'cd-note', 'cd-unclear']) CSS.highlights.delete(name);
     return;
   }
+  const unclearMarks = new Uint8Array(cm.text.length);
+  for (const [s, e] of diff.unclearRaw) unclearMarks.fill(1, s, e);
+  const unclear = new Highlight(...rangesFor(cm, unclearMarks, 1));
+  unclear.priority = -1; // corrections and notes paint on top of the yellow
+  CSS.highlights.set('cd-unclear', unclear);
   CSS.highlights.set('cd-del', new Highlight(...rangesFor(om, diff.origMarks, MARK_DEL)));
   CSS.highlights.set('cd-ins', new Highlight(...rangesFor(cm, diff.corrMarks, MARK_INS)));
   CSS.highlights.set('cd-note', new Highlight(...rangesFor(cm, diff.corrMarks, MARK_NOTE)));
@@ -363,6 +368,7 @@ function renderStats() {
     ? `<span class="chip"><i class="sw sw-ins"></i>${plural(diff.changes, 'correction', 'corrections')}</span>`
     : '<span class="chip">No changes yet</span>'];
   if (diff.notes) chips.push(`<span class="chip"><i class="sw sw-note"></i>${plural(diff.notes, 'note', 'notes')}</span>`);
+  if (diff.unclear) chips.push(`<span class="chip"><i class="sw sw-unclear"></i>${diff.unclear} unclear</span>`);
   stats.innerHTML = chips.join('');
 }
 
@@ -373,7 +379,8 @@ const env = nunjucks ? new nunjucks.Environment([], { autoescape: false, trimBlo
 if (env) {
   env.addFilter('collapsible', (content, title, open) =>
     content ? CD.sectionHTML(title == null ? 'Details' : String(title), String(content), !!open) : '');
-  env.addGlobal('legend', (del = 'removed', ins = 'added', note = 'note') => CD.legendHTML(String(del), String(ins), String(note)));
+  env.addGlobal('legend', (del = 'removed', ins = 'added', note = 'note', unclear = 'unclear') =>
+    CD.legendHTML(String(del), String(ins), String(note), unclear ? String(unclear) : ''));
 }
 
 const cleanError = e => String((e && e.message) || e).replace(/^\(unknown path\)\s*/, '').replace(/\s*\n\s*/g, ' ').trim();
@@ -408,6 +415,7 @@ function outputVars() {
     signature: richValue(signature),
     changes: diff ? diff.changes : 0,
     notes: diff ? diff.notes : 0,
+    unclear: diff ? diff.unclear : 0,
   };
 }
 
@@ -466,6 +474,9 @@ function htmlToText(html) {
         return;
       }
       case 'SUMMARY': block(); inner(); out += ':\n'; return;
+      case 'SPAN':
+        if (node.getAttribute('style') === STYLE.unclear) { out += '['; inner(); out += ']'; return; }
+        break;
       case 'EM':
         if (node.getAttribute('style') === STYLE.note) { out += '['; inner(); out += ']'; return; }
         break;
@@ -580,6 +591,11 @@ for (const ed of EDITORS) {
       document.execCommand('insertLineBreak');
       return;
     }
+    if (ed === corr && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === '?' || (e.shiftKey && e.code === 'Slash'))) {
+      e.preventDefault();
+      toggleUnclear();
+      return;
+    }
     if (e.isComposing || e.altKey || e.shiftKey || !(e.ctrlKey || e.metaKey)) return;
     const key = e.key.toLowerCase();
     const cmd = { b: 'bold', i: 'italic', u: 'underline' }[key];
@@ -676,6 +692,119 @@ function insertNote() {
   if (sel.modify) { sel.modify('move', 'backward', 'character'); sel.modify('move', 'backward', 'character'); }
 }
 $('btn-note').addEventListener('click', insertNote);
+
+/* ---------- Unclear passages ---------- */
+
+// Model index of a DOM position: the first character at or after it.
+function modelOffset(model, node, offset) {
+  const probe = document.createRange();
+  probe.setStart(node, offset);
+  const real = [];
+  for (let i = 0; i < model.nodes.length; i++) if (model.nodes[i]) real.push(i);
+  let lo = 0, hi = real.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1, i = real[mid];
+    if (probe.comparePoint(model.nodes[i], model.offs[i]) < 0) lo = mid + 1; else hi = mid;
+  }
+  return lo < real.length ? real[lo] : model.text.length;
+}
+// DOM point where model character i starts / where the text before index j ends.
+function pointBefore(model, i) {
+  while (i < model.nodes.length && !model.nodes[i]) i++;
+  return i < model.nodes.length ? [model.nodes[i], model.offs[i]] : pointAfter(model, model.nodes.length);
+}
+function pointAfter(model, j) {
+  let i = j - 1;
+  while (i >= 0 && !model.nodes[i]) i--;
+  if (i < 0) return [corr, 0];
+  return [model.nodes[i], model.offs[i] + 1];
+}
+function placeCaret([node, offset]) {
+  const r = document.createRange();
+  r.setStart(node, offset);
+  r.collapse(true);
+  const sel = getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+
+// The sentence around index c: from after the previous sentence end (or line
+// start) to its own end mark, including closing quotes or brackets.
+function sentenceAround(t, c) {
+  const isEnd = i => /[.!?…]/.test(t[i]);
+  const closing = /["'»«“”)\]]/;
+  let p = Math.min(c, t.length);
+  if (p > 0 && (p === t.length || /\s/.test(t[p])) && t[p - 1] !== '\n') p--;
+  let s = p;
+  while (s > 0 && t[s - 1] !== '\n') {
+    if (/\s/.test(t[s - 1])) {
+      let k = s - 2;
+      while (k >= 0 && closing.test(t[k])) k--;
+      if (k >= 0 && isEnd(k)) break;
+    }
+    s--;
+  }
+  while (s < t.length && /\s/.test(t[s])) s++;
+  let e = Math.max(p, s);
+  while (e < t.length && t[e] !== '\n' && !isEnd(e)) e++;
+  if (e < t.length && isEnd(e)) {
+    e++;
+    while (e < t.length && (isEnd(e) || closing.test(t[e]))) e++;
+  }
+  while (e > s && /\s/.test(t[e - 1])) e--;
+  return [s, e];
+}
+
+// Wrap the selection, or the sentence at the cursor, in "[? … ?]"; inside an
+// existing mark, remove it instead. Uses editing commands, so Ctrl+Z works.
+function toggleUnclear() {
+  const sel = getSelection();
+  if (document.activeElement !== corr) {
+    corr.focus();
+    const saved = lastRanges.get(corr);
+    if (saved && corr.contains(saved.startContainer)) { sel.removeAllRanges(); sel.addRange(saved); }
+  }
+  if (!sel.rangeCount || !corr.contains(sel.anchorNode)) return;
+  let model = readModel(corr, { positions: true });
+  const range = sel.getRangeAt(0);
+  let from = modelOffset(model, range.startContainer, range.startOffset);
+  let to = range.collapsed ? from : modelOffset(model, range.endContainer, range.endOffset);
+  const run = (cmd, text) => { try { document.execCommand(cmd, false, text); } catch { /* unsupported */ } };
+  const selectSpan = (s, e) => {
+    const r = document.createRange();
+    r.setStart(...pointBefore(model, s));
+    r.setEnd(...pointAfter(model, e));
+    sel.removeAllRanges();
+    sel.addRange(r);
+  };
+
+  const hit = CD.findUnclear(model.text).find(u => (from >= u.s && from <= u.e) || (to > u.s && to <= u.e));
+  if (hit) {
+    selectSpan(hit.e - hit.close, hit.e);
+    run('delete');
+    model = readModel(corr, { positions: true });
+    selectSpan(hit.s, hit.s + hit.open);
+    run('delete');
+    return;
+  }
+
+  if (from === to) [from, to] = sentenceAround(model.text, from);
+  while (from < to && /\s/.test(model.text[from])) from++;
+  while (to > from && /\s/.test(model.text[to - 1])) to--;
+  if (from === to) return;
+  // Closing marker first: the text before it keeps its positions.
+  placeCaret(pointAfter(model, to));
+  run('insertText', '?]');
+  model = readModel(corr, { positions: true });
+  placeCaret(pointBefore(model, from));
+  run('insertText', '[?');
+  model = readModel(corr, { positions: true });
+  placeCaret(pointAfter(model, to + 4));
+}
+
+const unclearBtn = $('btn-unclear');
+for (const btn of [$('btn-note'), unclearBtn]) btn.addEventListener('mousedown', e => e.preventDefault());
+unclearBtn.addEventListener('click', toggleUnclear);
 
 /* ---------- Undoable bulk actions ---------- */
 
@@ -928,6 +1057,7 @@ function sampleVars() {
     signature: richValue(signature) || '<p>Best regards,<br>Your teacher</p>',
     changes: d.changes,
     notes: d.notes,
+    unclear: d.unclear,
   };
 }
 

@@ -18,6 +18,8 @@ const STYLE = {
   details: 'margin:0 0 0.6em',
   summary: 'cursor:pointer;color:#344054',
   sectionBody: 'margin:0.5em 0 0.9em 0.3em;padding:0.1em 0 0.1em 0.9em;border-left:3px solid #e4e7ec;color:#344054',
+  unclear: 'background-color:#fef08a;border-radius:3px',
+  unclearMark: 'color:#a16207;font-weight:700',
 };
 
 // Inline formatting is carried per character, next to the text, as a bit set.
@@ -482,25 +484,75 @@ function extractNotes(raw) {
   return { text: out, map, notes };
 }
 
+// "[? … ?]" marks a passage the teacher can't follow. The markers (and the
+// spaces just inside them) are removed before diffing, like notes; the
+// passage itself is diffed normally and later shown in yellow.
+const UNCLEAR_RE = /\[\?[^\S\n]*([\s\S]*?)[^\S\n]*\?\]/g;
+function findUnclear(text) {
+  const found = [];
+  UNCLEAR_RE.lastIndex = 0;
+  let m;
+  while ((m = UNCLEAR_RE.exec(text))) {
+    const open = /^\[\?[^\S\n]*/.exec(m[0])[0].length;
+    const close = m[1] ? /[^\S\n]*\?\]$/.exec(m[0])[0].length : m[0].length - open;
+    found.push({ s: m.index, e: m.index + m[0].length, open, close });
+  }
+  return found;
+}
+
+// Remove the markers from the note-free text. Returns the new text, its map back
+// to the raw correction, notes moved to the new positions, the marked ranges in
+// the new text, and the raw ranges (markers included) for the editor highlight.
+function extractUnclear(text, map, notes) {
+  const found = findUnclear(text);
+  if (!found.length) return { text, map, notes, ranges: [], raw: [] };
+  const keep = new Uint8Array(text.length).fill(1);
+  for (const f of found) {
+    keep.fill(0, f.s, f.s + f.open);
+    keep.fill(0, f.e - f.close, f.e);
+  }
+  const index = new Int32Array(text.length + 1);
+  const newMap = [];
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    index[i] = newMap.length;
+    if (keep[i]) { out += text[i]; newMap.push(map ? map[i] : i); }
+  }
+  index[text.length] = newMap.length;
+  const raw = i => (map ? map[i] : i);
+  for (const n of notes) n.pos = index[Math.min(n.pos, text.length)];
+  return {
+    text: out,
+    map: newMap,
+    notes,
+    ranges: found.map(f => ({ start: index[f.s + f.open], end: index[f.e - f.close] })).filter(r => r.end > r.start),
+    raw: found.map(f => [raw(f.s), raw(f.e - 1) + 1]),
+  };
+}
+
 // Interleave notes with the diff runs at their anchor positions.
-function buildSegments(runs, a, b, notes) {
+function buildSegments(runs, a, b, notes, ranges = []) {
   const segs = [];
+  const cuts = [...new Set(ranges.flatMap(r => [r.start, r.end]))].sort((x, y) => x - y);
   let ni = 0;
   const flush = p => { while (ni < notes.length && notes[ni].pos <= p) segs.push({ t: 'note', note: notes[ni++] }); };
   const emitB = (t, b0, b1, fine) => {
     flush(b0);
     let cur = b0;
-    while (ni < notes.length && notes[ni].pos < b1) {
-      const p = notes[ni].pos;
-      if (p > cur) segs.push({ t, b0: cur, b1: p, text: b.slice(cur, p), fine });
-      cur = Math.max(cur, p);
-      flush(p);
+    const upTo = to => { if (to > cur) { segs.push({ t, b0: cur, b1: to, text: b.slice(cur, to), fine }); cur = to; } };
+    for (;;) {
+      const note = ni < notes.length ? notes[ni].pos : Infinity;
+      const cut = cuts.find(c => c > cur);
+      const p = Math.min(note, cut === undefined ? Infinity : cut);
+      if (p >= b1) break;
+      upTo(p);
+      if (p === note) flush(p);
     }
-    if (cur < b1) segs.push({ t, b0: cur, b1, text: b.slice(cur, b1), fine });
+    upTo(b1);
   };
   for (const r of runs) {
     if (r.eq) { emitB('eq', r.b0, r.b1); continue; }
-    if (r.a1 > r.a0) { flush(r.b0); segs.push({ t: 'del', a0: r.a0, a1: r.a1, text: a.slice(r.a0, r.a1), fine: r.fine }); }
+    if (r.a1 > r.a0) { flush(r.b0); segs.push({ t: 'del', a0: r.a0, a1: r.a1, at: r.b0, text: a.slice(r.a0, r.a1), fine: r.fine }); }
     if (r.b1 > r.b0) emitB('ins', r.b0, r.b1, r.fine);
   }
   flush(Infinity);
@@ -531,18 +583,20 @@ function tokenKeys(T, fmt) {
 function computeDiff(orig, corr, opts) {
   const style = STYLES.includes(opts.style) ? opts.style : 'phrases';
   const mode = style === 'chars' ? 'char' : 'word';
-  const ex = extractNotes(corr.text);
+  const notesOnly = extractNotes(corr.text);
+  const ex = extractUnclear(notesOnly.text, notesOnly.map, notesOnly.notes);
   const fmtA = orig.fmt || null;
   const fmtB = corr.fmt ? (ex.map ? ex.map.map(i => corr.fmt[i]) : corr.fmt) : null;
   const a = orig.text.replace(/\s+$/, '');
   const b = ex.text.replace(/\s+$/, '');
   for (const n of ex.notes) if (n.pos > b.length) n.pos = b.length;
+  const unclear = ex.ranges.map(r => ({ start: Math.min(r.start, b.length), end: Math.min(r.end, b.length) })).filter(r => r.end > r.start);
 
   const A = tokenize(a, mode), B = tokenize(b, mode);
   const [ia, ib] = intern(tokenKeys(A, fmtA), tokenKeys(B, fmtB));
   let runs = toRuns(diffTokens(ia, ib), A, B);
   runs = shapeRuns(runs, a, b, style, fmtA, fmtB, style !== 'chars' && opts.letters !== false);
-  const segs = buildSegments(runs, a, b, ex.notes);
+  const segs = buildSegments(runs, a, b, ex.notes, unclear);
 
   // Per-character marks for highlighting inside the two editors.
   const origMarks = new Uint8Array(orig.text.length);
@@ -558,6 +612,9 @@ function computeDiff(orig, corr, opts) {
     mode,
     changes: runs.filter(r => !r.eq && !r.fine).length + new Set(runs.filter(r => r.fine).map(r => r.fine)).size,
     notes: ex.notes.filter(n => n.text).length,
+    unclear: unclear.length,
+    unclearRanges: unclear,
+    unclearRaw: ex.raw,
     empty: !a && !b && !ex.notes.some(n => n.text),
     original: a,
     corrected: b,
@@ -589,11 +646,28 @@ function fmtHTML(text, fmt, offset) {
 
 function renderDiffHTML(diff) {
   const { segs, mode, fmtA, fmtB } = diff;
+  const ranges = diff.unclearRanges || [];
   const wordPad = mode === 'word' ? ';padding:1px 2px' : '';
   const pad = wordPad;
   const paras = [[]];
   let cur = paras[0];
-  const newPara = () => { if (cur.length) { cur = []; paras.push(cur); } };
+
+  // Unclear passages: a yellow span with "? … ?" inside it. A span can't cross
+  // paragraphs, so it is closed and reopened at paragraph breaks.
+  const U_OPEN = `<span style='${STYLE.unclear}'>`, U_CLOSE = '</span>';
+  const Q = `<strong style='${STYLE.unclearMark}'>?</strong>`;
+  let unclear = false;
+  const setUnclear = on => {
+    if (on === unclear) return;
+    cur.push(on ? `${U_OPEN}${Q} ` : ` ${Q}${U_CLOSE}`);
+    unclear = on;
+  };
+  const inside = p => ranges.some(r => r.start <= p && p < r.end);
+  const newPara = () => {
+    if (unclear) cur.push(U_CLOSE);
+    if (cur.length) { cur = []; paras.push(cur); }
+    if (unclear) cur.push(U_OPEN);
+  };
 
   const pushText = (text, fmt, offset) => {
     const re = /\n(?:[^\S\n]*\n)+|\n/g;
@@ -655,6 +729,7 @@ function renderDiffHTML(diff) {
 
   for (let k = 0; k < segs.length; k++) {
     const s = segs[k];
+    setUnclear(inside(s.t === 'del' ? s.at : s.t === 'note' ? s.note.pos : s.b0));
     if (s.t === 'eq') {
       pushText(s.text, fmtB, s.b0);
     } else if (s.t === 'del' || s.t === 'ins') {
@@ -682,7 +757,8 @@ function renderDiffHTML(diff) {
       else cur.push(esc(n.pre) + noteHTML(n) + esc(n.post));
     }
   }
-  return paras.filter(p => p.length).map(p => `<p>${p.join('')}</p>`).join('\n');
+  setUnclear(false);
+  return paras.filter(p => p.some(x => x !== U_OPEN && x !== U_CLOSE)).map(p => `<p>${p.join('')}</p>`).join('\n');
 }
 
 // Formatted text as HTML: blank lines start a paragraph, single newlines become
@@ -721,16 +797,18 @@ function sectionHTML(title, html, open) {
     `</details>`;
 }
 
-function legendHTML(del, ins, note) {
+function legendHTML(del, ins, note, unclear) {
+  const q = `<strong style='${STYLE.unclearMark}'>?</strong>`;
   return `<p style='${STYLE.legend}'>` +
     `<del style='${STYLE.del};padding:1px 2px'>${esc(del)}</del>&nbsp; ` +
     `<ins style='${STYLE.ins};padding:1px 2px'>${esc(ins)}</ins>&nbsp; ` +
-    `<em style='${STYLE.note}'>${esc(note)}</em></p>`;
+    `<em style='${STYLE.note}'>${esc(note)}</em>` +
+    (unclear ? `&nbsp; <span style='${STYLE.unclear}'>${q} ${esc(unclear)} ${q}</span>` : '') + '</p>';
 }
 
 const api = {
   esc, STYLE, STYLES, BOLD, ITALIC, UNDERLINE,
-  extractNotes, computeDiff, renderDiffHTML, modelToHTML, sectionHTML, legendHTML,
+  extractNotes, findUnclear, computeDiff, renderDiffHTML, modelToHTML, sectionHTML, legendHTML,
 };
 root.CorrectionDiff = api;
 if (typeof module === 'object' && module.exports) module.exports = api;
